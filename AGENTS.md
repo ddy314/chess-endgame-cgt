@@ -1,25 +1,33 @@
-# 数学研究与协作约定
+# Mathematical research and collaboration instructions
 
-本仓库现阶段研究搜索算法的数学理论。先研究、证明和核查，再由独立的 EvilChess 工程项目决定是否采用成果。以实际定理、反例、严格算法界限和证明为工作产出。
+## Mandatory English-language policy
 
-## 研究方法
+- English is the sole language for repository-authored explanatory prose. Write and maintain `README.md`, `AGENTS.md`, `PROOF.md`, research notes, Markdown documentation, manuscript exposition, source-code comments/docstrings, and pull-request descriptions in English. Use English for new or revised public-facing messages and instructions.
+- Audit **all tracked Markdown files**, including nested directories and archives, for Chinese-language explanatory text. Translate existing Chinese proofs and documentation into precise, idiomatic mathematical English in dedicated PRs. Preserve definitions, hypotheses, quantifiers, equations, proof dependencies, numbering, cross-references, bibliographic details, code behavior, and the exact strength of every claim. Never silently shorten or reinterpret a proof during translation.
+- Keep mathematical notation, source identifiers, and faithful quotations or official titles in their original form when required; provide an English explanation around any unavoidable original-language quotation. Do not leave mixed-language paragraphs, headings, tables, or code comments.
+- Before completing a documentation PR, inspect every changed file for residual Chinese prose and broken links/references. Review mathematical equivalence against the original and run existing relevant checks. A character scan is a useful audit aid, not a replacement for reading or proof review.
+- This requirement applies to all future contributions and edits, not only the present translation cleanup. Do not create new Chinese prose or alternate Chinese documentation copies. Keep English clear, direct, and technically specific; avoid defensive boilerplate and unsupported claims.
 
-- 以 [RESEARCH_PLAN.md](RESEARCH_PLAN.md) 为当前主线，自主选择窄而明确的问题深入推进，不为阶段性汇报停下研究。
-- 阅读相关先行文献，准确区分已有结论、直接推论、待证命题和新证明。数学新颖性需核查，不以找不到相同关键词判定创新。
-- 明确博弈模型、量词、边界条件、终止规则及证明依赖。完整国际象棋的重复局面、50/75 步规则、和棋与历史状态不能在模型转换时被悄悄删除。
-- 明确区分精确结果、条件性/概率性结论与启发式经验。随机试验、固定深度枚举和有限样本不能替代无限族定理的证明。
-- 积极检验反例；若原命题失败，寻找可证明的修正版本或更有价值的否定定理。
-- 优先寻找可复用的一般引理、算法界限和结构性结论，避免堆积缺乏推广性的孤立数值计算。
+This repository presently develops mathematical theory for chess search algorithms. Research, prove, and independently verify results before deciding whether the separate EvilChess engineering project should adopt them. The relevant outputs are theorems, counterexamples, rigorous algorithmic bounds, and proofs.
 
-## 内容与目录
+## Research method
 
-- `README.md` 是简洁的项目介绍；`RESEARCH_PLAN.md` 是当前研究计划。
-- 取得实质结果时创建或更新根目录 `PROOF.md`，按数学问题组织定义、定理、证明和反例。不要把研究拆成阶段日志或进度报告。
-- `archive/elkies-pawn-endgames/` 保存此前 Elkies 兵残局成果；继续引用时须遵守原模型与证明适用范围。历史内容除必要勘误外不重新包装成新成果。
-- 必需的数学验证脚本可以放入 `scripts/`。本仓库不开发对弈引擎、界面、推理服务、训练模型或硬件优化代码。
-- 不提交运行日志、临时数据、无必要的证书包、SHA 清单、发布流水线或管理性脚手架。构建与临时计算文件不纳入版本控制。
-- README、证明和 PR 使用直接、简洁的技术陈述，不添加防御性宣言或夸大性能、创新性的措辞。
+- Use [RESEARCH_PLAN.md](RESEARCH_PLAN.md) as the active agenda. Independently select narrow, precise problems and pursue them without interrupting work for stage reports.
+- Read relevant prior literature. Distinguish established results, immediate deductions, open conjectures, and original proofs. Verify mathematical novelty; failure to find matching keywords is insufficient.
+- Specify the game model, quantifiers, boundary conditions, termination rules, and proof dependencies. Repetition, the 50/75-move rules, draws, and position history in full chess must not disappear silently in model reductions.
+- Distinguish exact results, conditional/probabilistic claims, and empirical heuristics. Random trials, fixed-depth enumerations, and finite samples do not prove infinite-family theorems.
+- Actively test counterexamples. If a conjecture fails, seek a provable correction or a more valuable negative theorem.
+- Prefer reusable general lemmas, algorithmic bounds, and structural statements over isolated numerical results lacking a route to generalization.
 
-## 提交原则
+## Content and layout
 
-在有明确数学成果时提交 PR，说明问题、定理、证明位置及核查方式。尚未完成的猜想可以在研究过程中继续推进，无须为了产出 PR 把中间过程包装成成果。 
+- `README.md` is a concise introduction; `RESEARCH_PLAN.md` is the current research agenda.
+- On substantial progress, create or update root `PROOF.md`, organized by mathematical topic with definitions, theorems, proofs, and counterexamples. Do not split research into stage logs or progress reports.
+- `archive/elkies-pawn-endgames/` retains earlier Elkies pawn-endgame work. Respect its model and proof scope when citing it. Apart from necessary corrections, do not repackage historical results as new findings.
+- Necessary mathematical checking scripts may go under `scripts/`. This repository does not implement a chess engine, interface, inference service, training model, or hardware optimization.
+- Do not commit execution logs, temporary datasets, unnecessary certificate bundles, SHA manifests, release pipelines, or administrative scaffolding. Ignore build and temporary computational files.
+- Use direct, concise technical statements in README, proofs, and PRs. Avoid defensive declarations or exaggerated claims about performance and novelty.
+
+## Submission principle
+
+Submit a PR when a clear mathematical result exists, stating the problem, theorem, proof location, and verification procedure. Unfinished conjectures may remain in active research; do not package intermediate steps as achievements merely to produce a PR.

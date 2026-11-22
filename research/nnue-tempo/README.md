@@ -1,5 +1,7 @@
 # The value of having the move in Stockfish NNUE
 
+[Integrated endgame study (PDF)](manuscript/paper.pdf) · [Evidence and reproduction guide](manuscript/README.md)
+
 [Research paper (PDF)](paper.pdf) · [Manuscript source](paper.typ) · [Annotated primary literature](literature.md) · [Numerical results](results.json) · [Four-man census and 48 chess tests](atlas/README.md)
 
 The experiment compares static evaluation on the same placement with either side to move. Syzygy supplies the paired outcome in fourteen material classes. Stockfish 12, 14.1 and 18 cover three generations of NNUE. The research includes a full KPK census, layer-wise interventions, a replication on played positions, and controlled move selection. The classical and neural static evaluations come directly from each release that includes both. Stockfish 18 supplies a separate large-network input-channel intervention.

@@ -37,13 +37,14 @@ struct Material {
   }
 };
 int main(int argc, char **argv) {
-  if (argc != 6)
+  if (argc != 6 && argc != 7)
     return 2;
   int a = std::stoi(argv[2]), b = std::stoi(argv[3]);
   std::string mode = argv[5];
   bool promotion = mode == "promotion", solo = mode == "solo" || promotion,
        relaxed = mode == "relaxed";
   Material base(argv[1], a, b), queen(argv[1], solo ? a : 5, b);
+  const U seed = argc == 7 ? std::stoull(argv[6]) : 591234;
   Geometry geo;
   std::ofstream out(argv[4]);
   for (int idx = 0; idx < 64 * 64 * 64; idx++) {
@@ -83,7 +84,7 @@ int main(int argc, char **argv) {
             out << w << " " << k << " " << y << " " << h << " " << l << " " << s
                 << "\n";
           else {
-            U hash = mix((U(idx) * 4096 + h * 64 + l) + 591234);
+            U hash = mix((U(idx) * 4096 + h * 64 + l) + seed);
             if (hash < best) {
               best = hash;
               bh = h;

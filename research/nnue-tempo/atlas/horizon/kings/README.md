@@ -2,6 +2,8 @@
 
 Two kings can reverse a bishop interception by blocking a capture, supplying a target for a pin or a discovered check, or attacking the bishop while supporting promotion. Stockfish 14.1's static NNUE orders all 42 examples of the last pattern correctly and misses 93 of 108 quiet pins in the reversal set. A second experiment follows a black king escorting a pawn against a rook or a queen. On 2,830 matched comparisons the board geometry and the decisive escort rule agree across materials, while different hidden coordinates carry the score difference.
 
+The input-level follow-up traces the material change to the two king perspectives, identifies five promotion-square channels, and tests hidden-layer interventions on 581 played promotion decisions and on rook skewers and knight forks. [From king-relative inputs to endgame decisions](routes/README.md)
+
 ## What is compared
 
 White has two legal quiet moves of the same piece from the same starting square. They receive identical full classical scores. Black to move has neither an immediate capture nor a promotion after either choice. The high child H has a better Syzygy outcome for Black than the low child L. Every distinct pair of destinations counts once per fixed material, kings and black piece, across all common sources. Outcomes use the sign of fresh-clock Syzygy WDL as in the parent study. Accuracy gives half credit to a tied score. Coordinate numbers start at zero in the released eight-unit bottleneck. [Atlas and classical evaluation](../../README.md) · [Pawn race, network and thirteen-ply interval definitions](../README.md)

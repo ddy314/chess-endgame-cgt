@@ -2,6 +2,8 @@
 
 We enumerated 214,063,938 distinct nonterminal, nonchecked boards in 25 four-man material classes. Every board has a Syzygy label, two classical scores and the three native SF14.1 NNUE readouts. The complete one-reply analysis uses 107,031,969 horizontal-reflection representatives and all 1,543,690,301 of their legal replies. Forty-four of 48 proposed chess rules erase a strict WDL distinction between classically tied moves somewhere in this domain. Twenty-seven admit a witness where exactly one of the 48 restrictions erases that particular distinction. The [chess findings ledger](FINDINGS.md) describes each rule, its evidence and the sparse or empty cases.
 
+The [quiet endings and two-coordinate head study](horizon/README.md) follows the unresolved quiet comparisons with new played positions, bounded conversion proofs and exhaustive knight- and bishop-versus-pawn interventions.
+
 ## What the original hand evaluation loses
 
 White and Black each have one king and one P, N, B, R or Q. Fix the two kings, the black man's square and both piece types. Vary the white man's square, keeping Black to move. Partition the resulting boards by Stockfish 14.1's full classical score before final grain truncation. We disable both classical lazy cutoffs and preserve the native specialized ending functions. Take optimal play after the static position from the sign of Syzygy WDL. Cursed wins and blessed losses use the sign of the five-valued WDL code. The corpus uses empty castling and en-passant rights, no position history, and a zero clock. Board legality is checked locally. A material class identifies the colors of the two men.

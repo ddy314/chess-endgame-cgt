@@ -14,8 +14,8 @@ import chess
 import chess.pgn
 
 
-def batches(root):
-    for month in range(4, 10):
+def batches(root, months=range(4, 10)):
+    for month in months:
         path = root / "atlas" / f"games-{month:02}.zst"
         games = screened = 0
         batch = []

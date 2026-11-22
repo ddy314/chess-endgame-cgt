@@ -2,6 +2,8 @@
 
 A black pawn's race against a white knight or bishop occupies a narrow part of the released eight-unit NNUE bottleneck. On 8,893,661 legal horizontal-reflection representatives, substituting six constants and preserving the remaining two coordinates and the learned direct piece-square score reproduces 98.44% of the native integer evaluations. A two-piece pursuit game explains many of the network's preferences between legal moves. Its exceptions, positions with equal chess outcomes, all 256 bottleneck interchanges, and independent played alternatives distinguish the scope of the explanation. [Per-board compression](results/compressed-head.csv) · [Exhaustive move comparisons](results/race-unit-census.csv)
 
+The follow-up classifies all 295 reversed bishop comparisons and replays every thirteen-ply residual. In 2,830 matched rook and queen comparisons, the same pawn-escort dependency travels through different hidden coordinates. [King geometry and neural interventions](kings/README.md)
+
 ## Data and decisions
 
 All boards come from the specified [four-man atlas](../README.md). A sibling pair fixes both kings, the black man, material and at least one common source for the two White moves. Both moves are quiet, keep both kings out of check, and have the same full SF14.1 classical evaluation. The additional quiet filter rules out every immediate legal Black capture or promotion after either move. Search and network scores are from Black's perspective. The primary informative pairs have distinct Syzygy WDL signs. Accurate sorting earns one point and a tie earns half. The target is the fresh-clock sign of the five-category tablebase result under continued play. Repetition claims and an increasing fifty-move clock are outside this history-free experiment.

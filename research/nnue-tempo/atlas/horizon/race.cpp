@@ -39,8 +39,14 @@ Table race(const Geometry &g, int a, U obstacles) {
   return escaping;
 }
 int main(int argc, char **argv) {
-  if (argc != 5)
+  if (argc != 5 && argc != 6)
     return 2;
+  std::ofstream exceptions;
+  if (argc == 6) {
+    exceptions.open(argv[5]);
+    if (!exceptions)
+      return 2;
+  }
   const int a = std::stoi(argv[2]);
   std::string stem = std::to_string(a) + "-1";
   if (std::string(argv[3]) == "tables") {
@@ -136,6 +142,17 @@ int main(int argc, char **argv) {
             if (truth || r) {
               const int target = truth ? truth : r;
               auto c = head.credits(raw[i], raw[j], pre[i], pre[j], target);
+              if (argc == 6 && v == 0 && truth * r < 0) {
+                const int hi = truth > 0 ? i : j, lo = truth > 0 ? j : i;
+                exceptions << w << " " << k << " " << y << " " << hi << " "
+                           << lo << " " << __builtin_ctzll(src[i] & src[j])
+                           << " " << st[hi].n - st[lo].n;
+                for (auto credit : c)
+                  exceptions << " " << credit;
+                exceptions << " " << int(raw[hi].h[6]) - int(raw[lo].h[6])
+                           << " " << int(raw[hi].h[7]) - int(raw[lo].h[7])
+                           << "\n";
+              }
               auto &stats = replay[v][truth ? 1 + truth * r : 3];
               ++stats[0];
               stats[7] += 1 + target * sign(frozen[i] - frozen[j]);
@@ -171,5 +188,5 @@ int main(int argc, char **argv) {
         patch << " " << total;
       patch << "\n";
     }
-  return rr.eof() && out ? 0 : 4;
+  return rr.eof() && out && patch && audit && (argc == 5 || exceptions) ? 0 : 4;
 }

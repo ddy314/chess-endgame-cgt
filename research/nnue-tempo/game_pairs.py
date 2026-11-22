@@ -50,13 +50,13 @@ def positions(movetext, rng):
     return chosen
 
 
-def main(root):
+def main(root, month, output):
     rng = random.Random(15012013)
     rows, games, hits = [], 0, 0
     with chess.syzygy.open_tablebase(root / "pychess/data/syzygy/regular") as tb:
         tb.add_directory(str(root / "tb5"))
         with subprocess.Popen(
-            ["zstd", "-dc", root / "lichess-2013-01.pgn.zst"],
+            ["zstd", "-dc", root / f"lichess-{month}.pgn.zst"],
             text=True,
             stdout=subprocess.PIPE,
         ) as proc:
@@ -81,7 +81,7 @@ def main(root):
     for i in range(0, len(rows), 512):
         evaluate(rows[i : i + 512], root / "sf141/src/stockfish", True)
     print("games", games, "eligible games", hits, "game-family pairs", len(rows))
-    with gzip.open(root / "games.jsonl.gz", "wt") as f:
+    with gzip.open(root / output, "wt") as f:
         for row in rows:
             print(json.dumps(row), file=f)
     for m in MATERIAL + EXTENDED:
@@ -106,4 +106,7 @@ def main(root):
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("scratch", type=Path)
-    main(p.parse_args().scratch)
+    p.add_argument("--month", default="2013-01")
+    p.add_argument("--output", default="games.jsonl.gz")
+    args = p.parse_args()
+    main(args.scratch, args.month, args.output)

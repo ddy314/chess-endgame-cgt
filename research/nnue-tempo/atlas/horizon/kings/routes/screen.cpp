@@ -41,8 +41,8 @@ int main(int argc, char **argv) {
     return 2;
   int a = std::stoi(argv[2]), b = std::stoi(argv[3]);
   std::string mode = argv[5];
-  bool promotion = mode == "promotion", solo = mode == "solo" || promotion,
-       relaxed = mode == "relaxed";
+  bool promotion = mode == "promotion", open = mode == "open",
+       solo = mode == "solo" || promotion || open, relaxed = mode == "relaxed";
   Material base(argv[1], a, b), queen(argv[1], solo ? a : 5, b);
   const U seed = argc == 7 ? std::stoull(argv[6]) : 591234;
   Geometry geo;
@@ -53,7 +53,8 @@ int main(int argc, char **argv) {
     int w = idx >> 12, k = (idx >> 6) & 63, y = idx & 63;
     if (promotion && y / 8 != 1)
       continue;
-    U candidates = promotion ? ~U(0) : base.quiet[idx] & queen.quiet[idx];
+    U candidates =
+        (promotion || open) ? ~U(0) : base.quiet[idx] & queen.quiet[idx];
     if (!candidates || w % 8 >= 4)
       continue;
     U occ = (U(1) << w) | (U(1) << k) | (U(1) << y), src[64]{};

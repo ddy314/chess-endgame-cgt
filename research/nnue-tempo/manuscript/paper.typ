@@ -1,167 +1,323 @@
-#set document(date: datetime(year: 2026, month: 11, day: 22), title: "How a static chess evaluator distinguishes moves that hand evaluation ties")
-#set page(paper:"a4",margin:(left:21mm,right:21mm,top:21mm,bottom:18mm),numbering:"1",header:align(right,text(8pt,fill:rgb("#59666a"))[Stockfish 14.1 · Endgame evaluation]))
-#set text(font:"Libertinus Serif",size:11pt,lang:"en")
-#set par(leading:.56em,justify:false)
-#set heading(numbering:none)
-#let teal=rgb("#19586a")
-#show heading.where(level:1): it => block(above:8pt,below:6pt,text(size:18pt,weight:"bold",fill:teal,it.body))
-#show heading.where(level:2): it => block(above:6pt,below:3pt,text(size:12pt,weight:"bold",it.body))
-#let tbl(cols,headers,rows) = {
-  set text(size:9.6pt)
-  table(columns:cols,stroke:none,inset:(x:5pt,y:3.5pt),align:left,
-    fill:(x,y)=>if y==0 {rgb("#dfecee")} else if calc.even(y) {rgb("#f5f7f7")},
-    table.header(..headers.map(h=>text(weight:"bold",h))),..rows.flatten())
+#set document(date: datetime(year: 2026, month: 11, day: 23), title: "When Promotion Cues Mislead Stockfish NNUE")
+#set page(
+  paper: "us-letter",
+  columns: 2,
+  margin: (left: 0.75in, right: 0.75in, top: 0.78in, bottom: 0.88in),
+  header: context if counter(page).get().first() > 1 [
+    #set text(size: 8pt)
+    #align(right)[When Promotion Cues Mislead Stockfish NNUE]
+  ],
+  footer: context align(center, text(size: 8.5pt, fill: black, counter(page).display())),
+)
+#set columns(gutter: 0.33in)
+#set text(font: "Libertinus Serif", size: 9pt, fill: black, lang: "en")
+#set par(leading: 0.51em, spacing: 0.44em, first-line-indent: 0.8em, justify: true)
+#set place(clearance: 10pt)
+#show raw.where(block: false): set text(font: "Liberation Mono", size: 7.8pt)
+#show link: set text(fill: black)
+#set list(indent: 0.8em, body-indent: 0.45em, spacing: 0.38em)
+#set enum(indent: 0.8em, body-indent: 0.45em, spacing: 0.38em)
+
+#set heading(numbering: "1.1")
+#show heading.where(level: 1): it => block(
+  above: 10pt,
+  below: 4pt,
+  sticky: true,
+  {
+    set par(first-line-indent: 0pt, justify: false)
+    set text(font: "Libertinus Serif", size: 10.5pt, weight: "bold", fill: black)
+    if it.numbering != none {
+      counter(heading).display(it.numbering)
+      h(0.65em)
+    }
+    it.body
+  },
+)
+#show heading.where(level: 2): it => block(
+  above: 8pt,
+  below: 3pt,
+  sticky: true,
+  {
+    set par(first-line-indent: 0pt, justify: false)
+    set text(font: "Libertinus Serif", size: 9.6pt, weight: "bold", fill: black)
+    if it.numbering != none {
+      counter(heading).display(it.numbering)
+      h(0.55em)
+    }
+    it.body
+  },
+)
+
+#show figure.where(kind: table): set figure.caption(position: top)
+#set figure(gap: 5.5pt)
+#show figure.caption: it => {
+  set text(size: 8.4pt, fill: black)
+  set par(leading: 0.44em, first-line-indent: 0pt, justify: true)
+  align(left)[*#it.supplement #context it.counter.display(it.numbering):* #it.body]
 }
-#let cap(body)=block(above:3pt,below:6pt,text(size:9.3pt,body))
-#let evidence="https://github.com/dongxuelian2/chess-endgame-cgt/pull/3"
-#text(size:26pt,weight:"bold")[How a static chess evaluator distinguishes moves that hand evaluation ties]
-#v(2pt)
-#text(size:14pt,fill:teal)[King-relative coordinates and conditional signal transmission in Stockfish NNUE]
-#v(3pt)
-#text(size:10pt)[Research manuscript · November 2026]
-= Abstract
-Which chess distinctions can a learned static evaluator recover after the hand evaluator has assigned two moves the same score? We study the released Stockfish 14.1 network, using exact endgame outcomes to label choices and legal-move deletions to isolate the action that separates them. Across 214,063,938 four-man boards, classical-score collisions include 1,313,752 four-board configurations whose strict preference reverses when the opponent's piece moves. An additive piece-square score cannot realize both preferences; the full network does so on 663,639 configurations. We trace particular decisions to the king-relative input accumulators, both hidden layers and the final integer score. A change of material can shift the range of one hidden unit while a different unit supplies its move-dependent signal. In 3,029 held-out rook-skewer comparisons, replacing two first-layer coordinates from the queen moves the bishop's second-layer unit 2 almost entirely to its floor. Promotion control is encoded in both king perspectives. Four discovery-selected coordinates per file account for losses of 10.8–28.3 ordering points on fresh layouts when their joint move difference is removed. On 1,314 played-position alternatives this intervention costs 12.4 points. On three previously unexplained files, the intact network scores 97.54% when straight promotion decides the choice and 44.05% when capture-promotion decides it. The same framework explains a recurring failure on quiet bishop pins. The results separate the chess action that changes the outcome, its representation in a fixed network, and the part of that representation that changes a decision.
 
-= 1. The comparison to make
-White has a choice in a queen-versus-pawn ending. With Ka5 and Qb8 against Kg2 and Pf3, Qb6 permits the saving ...f2, while Qb7 pins the pawn and wins. Stockfish's specialized hand formula assigns both children −2494 from Black's perspective. The static neural evaluator assigns −17 and −889. This example motivates two questions. Which information did the hand formula discard? What computation makes the neural ranking sensitive to it?
-
-We first identify a class of rankings that requires two piece placements to interact. We then trace the interaction on three chess motifs: escort and promotion, a rook check skewering the king and a man behind it, and a knight check forking a rook. Across these motifs, three operations recur. King-relative inputs encode access to particular squares. Piece identity and placement move later sums across thresholds. A signal affects the selected move when its contribution is large enough relative to the other score terms. Each step admits a separate experimental intervention.
-
-#let diagram = {
-  let pieces = (b8: "♕", a5: "♔", g2: "♚", f3: "♟")
-  let files = ("a","b","c","d","e","f","g","h")
-  grid(columns:(9pt,) + (14pt,)*8,rows:(14pt,)*8 + (9pt,),align:center+horizon,
-    ..range(72).map(i => {
-      let row=calc.floor(i/9)
-      let col=calc.rem(i,9)
-      if col==0 {text(7pt,str(8-row))} else {
-        let key=files.at(col - 1)+str(8-row)
-        let tint=if key in ("b7","b6","f2") {rgb("#e4bb7d")} else if calc.odd(row+col) {rgb("#eef2ef")} else {rgb("#a6bcc0")}
-        box(width:14pt,height:14pt,fill:tint,align(center+horizon,text(font:"DejaVu Sans",size:12pt,pieces.at(key,default:""))))
-      }
-    }),[],..files.map(f => text(7pt,f)))
+#let booktabs(cols, aligns, headers, rows, size: 8pt, midrules: (), ypad: 2.7pt) = {
+  set text(size: size, fill: black)
+  set par(leading: 0.40em, first-line-indent: 0pt, justify: false)
+  let body = ()
+  for (i, row) in rows.enumerate() {
+    if i in midrules {
+      body.push(table.hline(stroke: 0.35pt + luma(150)))
+    }
+    body += row
+  }
+  table(
+    columns: cols,
+    align: aligns,
+    stroke: none,
+    inset: (x: 5pt, y: ypad),
+    table.hline(stroke: 0.9pt + black),
+    table.header(..headers.map(h => text(weight: "bold", h))),
+    table.hline(stroke: 0.5pt + black),
+    ..body,
+    table.hline(stroke: 0.9pt + black),
+  )
 }
-#v(4pt)
-#align(center,grid(columns:(auto,195pt),gutter:16pt,align:horizon,
-  diagram, [*Position 1. White to move.* The marked squares are the two queen destinations and Black's prospective pawn push. From b7 the queen attacks the black king along b7–c6–d5–e4–f3–g2. Advancing the f3 pawn would expose its own king. From b6 the pawn can advance legally.]))
 
-#pagebreak()
-= 2. Positions, labels and interventions
-*Chess domain.* Each side has a king and one man from pawn, knight, bishop, rook or queen. The main atlas fixes Black to move; the 25 ordered material classes distinguish colors. Positions are locally legal, nonterminal and check-free, with empty castling and en-passant rights. The target is the sign of the five-valued Syzygy WDL code at a fresh clock, counting cursed wins and blessed losses by their sign. This convention measures theoretical outcome with zeroed history. A complete census contains 214,063,938 boards, or 107,031,969 representatives under horizontal reflection. All neural scores agree across paired reflections. White's king occupies files a–d in the canonical enumeration.
+#let refitem(n, body) = block(above: 0pt, below: 2.8pt)[
+  #set par(first-line-indent: 0pt, hanging-indent: 2.05em, leading: 0.41em, justify: true)
+  #box(width: 2.05em)[[#n]]#body
+]
 
-*Classical score and choices.* We use 14.1's classical evaluator with both lazy cutoffs disabled, before its final grain truncation, retaining its specialized endings. Some endings have an especially transparent collision: the queen-versus-pawn formula reads the two kings and the pawn and omits the queen square. In a fixed context (material, both kings, black man's square), stratify by classical score. The smallest attainable number of WDL errors for a lookup that sees this context and score is the sum of each stratum's size minus its modal label count. This is 13,265,530; adding the native neural score to the key reduces it to 2,673,035. This measures available information on the finite census. For move tests we additionally require a single White source square from which both destinations are legal. Let $H$ and $L$ be the resulting children with higher and lower outcome for Black. A positive neural margin earns one point, a tie one half. On 342,175,835 distinct-outcome classical ties within fixed contexts, including pairs without a common source, the network earns 69.65%.
+#place(top + center, scope: "parent", float: true, clearance: 12pt)[
+  #set par(first-line-indent: 0pt, justify: false)
+  #set align(center)
+  #block(width: 100%)[
+    #text(font: "Libertinus Serif", size: 19pt, weight: "bold")[
+      #set par(leading: 0.31em)
+      When Promotion Cues Mislead Stockfish NNUE
+    ]
+    #v(7pt)
+    #text(size: 9.5pt)[Anonymous research manuscript]
+  ]
+]
 
-*Action test.* At the selected Black decision delete every move satisfying a named chess condition, then optimize over the surviving moves using orthodox tablebase values for the continuations. The escort test restricts a later Black action and backs up through both players by minimax. If a deletion would empty a node, retain its orthodox value. A pair qualifies if the deletion erases or reverses its strict order. For promotion the action is any legal first-turn promotion. A skewer is a rook check with the white king strictly between the checking rook and the white man on a rank or file. A safe fork is a knight check attacking that man with no legal immediate capture of the knight. Fork tests also require the action on $H$ alone. In a substitution test both materials must qualify with identical baseline outcome signs, the same kings and the same moves. Quiet panels exclude immediate captures and promotions. Promotion panels admit them.
+#heading(numbering: none, outlined: false)[Abstract]
+#par(first-line-indent: 0pt)[
+A chess evaluator can recognize a defended promotion square and still favor a move that allows promotion by capture. Using legal move pairs and exact endgame outcomes, we trace this conflict in Stockfish 14.1's efficiently updatable neural evaluator (NNUE) and test it across three releases. Equalizing four input channels improves synthetic comparisons and has near-zero average effect in two played samples. Matching defender, geometry and native score margin leaves a gap. The four channels differ less between the played moves and their alternatives. A frozen capture indicator improves ordering by 4.84 percentage points on the original four-piece validation set and by 0.77 on new classically tied played pairs. Tests up to six pieces identify competing promotions that reverse the indicator's implication. Native shallow search resolves most four-piece errors. Rook and knight controls distinguish a broadly used readout from a more tactic-specific path.
+]
 
-*Circuit test.* We use the four-man head of the released network #raw("nn-13406b1dcbe0.nnue"). Each perspective supplies 1,024 clipped accumulator bytes to an eight-unit hidden layer, then a 32-unit hidden layer and a scalar positional output. A learned direct piece-square branch joins at the output. Unit indices are zero-based; FT0–1023 denote the Black view in these children. For a nominated coordinate set, replace its value at $H$ by its value at $L$ and rescore $H$ against intact $L$; also test the reciprocal donor. Average the two ordering credits. The recipient retains its own direct score and all untargeted coordinates. For a material substitution we also transplant the other material's values at the same endpoints. Native scores are checked against the dense atlas. Earlier independent Stockfish traces checked 4,146 scalar values per board observation on 968 observations.
+#heading(numbering: none, outlined: false)[Keywords]
+#par(first-line-indent: 0pt)[Chess endgames, static evaluation, NNUE, interpretability, Syzygy tablebases]
 
-*Validation design.* Discovery uses one fixed-hash pair per eligible king–king–attacker placement. We split unordered king pairs grouped under all eight square symmetries, then select a different pair by a second hash on held-out king groups. Validation excludes unchanged destination pairs. Every retained test pair is relabelled using legal play. A second tactical test drops the substitution requirement and samples fixed-material placements entirely outside the matched panel. In game panels one candidate was played and a legal alternative was available from that parent. Units of counting are specified for each result. These cohorts overlap earlier research at the level of motifs and game archives.
+= Introduction
+In @fig:opening, White chooses between Qb6 and Qb7. The second move pins the f3 pawn and wins, while the first permits the drawing ...f2. Stockfish 14.1 uses a special hand-written rule for queen against pawn. With both kings and the pawn fixed, that rule omits the queen's square and gives both moves −2494 from Black's perspective. The static neural evaluator gives −17 after Qb6 and −889 after Qb7. The same network can also make the opposite kind of mistake. With a pawn on g2 and a white queen on e1, Qf1 attacks g1, yet lets Black play ...gxf1=Q mate. The evaluator prefers Qf1 to a draw.
 
-#pagebreak()
-= 3. What the network must compute
-*Proposition 1 (a ranking obstruction).* Fix both kings and material. Put the white man at $i$ or $j$ and the black man at $y$ or $z$. Suppose the true WDL order between $i$ and $j$ is strict and opposite on the two rows. A separable score $S(x,t)=f(x)+g(t)$ followed by a fixed monotone quantizer cannot be strictly correct on both. If the target takes values in $\{-1,0,1\}$, the maximum absolute approximation error of a separable score on the rectangle is at least $1/2$.
+#figure(
+  placement: auto,
+  caption: [Two moves from the same parent. Qb6 permits ...f2 and draws. Qb7 pins the f3 pawn to Kg2 and wins. The classical evaluator gives both children the same value.],
+  grid(
+    columns: (1fr, 1fr),
+    column-gutter: 8pt,
+    align: center,
+    [#image("board-b6.svg", width: 100%, alt: "After Qb6 the black pawn on f3 can advance") #linebreak() #text(size: 8.5pt)[*(a) Qb6* · Draw]],
+    [#image("board-b7.svg", width: 100%, alt: "After Qb7 the queen pins the pawn on f3 against the black king") #linebreak() #text(size: 8.5pt)[*(b) Qb7* · White wins]],
+  ),
+) <fig:opening>
 
-_Proof._ The margin of the separable score on either row is $f(i)-f(j)$. Quantization preserves weak order. The target's mixed difference has magnitude at least two; that of $S$ is zero. The four endpoint errors bound the magnitude of their alternating sum by four times the largest error. The same ranking obstruction holds after adding a function of features constant within each row. #sym.square.filled
+The same geometric cue can improve or degrade an evaluator's ranking when a different legal continuation becomes decisive. We test that proposition using two interventions on the same choices. Deleting a class of chess replies measures its role in the exact outcome. Replacing activations measures their role in the score. A single-board prediction then tests whether the chess interpretation carries across materials, evaluators and search depths. Rook skewers and knight forks serve as comparisons for the specificity of an internal path.
 
-In the atlas we additionally match the pre-grain classical score and 48 reply-availability flags within each row and require a common legal White source. There are 1,313,752 reversing rectangles. The direct learned piece-square branch solves zero, the nonlinear positional branch solves 658,097, and the complete score solves 663,639. Requiring all four classical scores and flag vectors to coincide leaves 250,321 rectangles; the full network solves 141,837. A rectangle can share boards with others. These counts establish a need for interaction and locate sufficient machinery for some of it.
+= Related work
+Pálsson and Björnsson [1] showed that probes can recover human chess concepts from Stockfish 14.1. McGrath et al. [2] traced chess knowledge during AlphaZero training, and Schut et al. [8] optimized for concepts useful in play. Jenner et al. [3] used interventions to locate information about future moves in Leela's transformer. We start with exact preference labels for two moves from one parent and ask which legal continuation and which part of a static scalar evaluator account for the preference. Classic work on chess search also distinguishes the treatment of tactical continuations from the evaluation of a quiet endpoint [9]. Our search comparison measures that distinction experimentally.
 
-*Proposition 2 (threshold transmission).* Write an input accumulator at fixed kings as $a(x,t)=b+p(t)+m(x)$. Its raw move difference is independent of $t$. After clipping, for integer bounds $0$ and $127$, the signed move difference counts thresholds between the two endpoints. More generally let $Q_s(z)=min(127,max(0,floor(z/s)))$, with $s=1$ at the accumulator and $s=64$ at a hidden unit. For $v>=u$,
-$ Q_s(v)-Q_s(u)= sum_(j=1)^127 bold(1){u<s j<=v}. $
-_Proof._ $Q_s(v)$ equals the number of positive thresholds $s,2s,…,127s$ at or below $v$. Subtraction counts those crossed by the move. A background shift of both endpoints can therefore change the transmitted gap with the raw move difference fixed. #sym.square.filled
+Patching results depend on the donor, metric and target component [10, 11]. We use legal sibling donors in both directions, match control inputs by activation change and check the legal action independently. The results concern the modified computation under those donors. The board-only indicators and exact outcomes provide separate tests wherever activation edits would combine coordinates from two distinct states.
 
-*Accounting and intervention.* For an affine layer $z=W h+b$, let $d_j=Delta Q(z_j)/Delta z_j$ for unequal endpoints, and set it to zero for equal endpoints. Then $Delta h'_j=d_j sum_i W_(j i) Delta h_i$. Recursing gives exact signed edge allocations for the positional margin before final truncation. These are endpoint identities; different edges can cancel. We rank input coordinates by mean signed allocation on the discovery set, then test a finite donor intervention on separate layouts. Material-gate discovery ranks the reduction in a designated downstream preactivation under a piece exchange. Fork discovery ranks the contribution passing through H1 units 0, 1 and 4.
+= Positions and tests
+*Comparisons.* The four-piece atlas contains both kings and one additional pawn, knight, bishop, rook or queen per side, giving 25 ordered material classes. Black moves in each child. The boards have no check, castling or en passant rights, and use a fresh clock. We collapse Syzygy's five-valued win/draw/loss (WDL) result to three signs [5]. The positive sign favors Black and includes wins classified as cursed under the move clock. Each move pair comes from one legal White parent. Its two children tie in the full classical score before rounding to a multiple of 16 and with early score cutoffs disabled and specialized evaluation rules retained. We give one point for the correct strict ranking, half a point for a tied score, and zero for the reverse. We call the mean *ordering credit*.
 
-*Decision margin.* Let $M$ denote the difference in total native pre-output units (including the direct branch). Equalizing second-layer unit $j$ subtracts $c_j=w_j Delta h_j$ from this margin in either donor direction. Each integer score is truncated toward zero after division by 16. Each patched score difference is within 2 of $(M-c_j)/16$, so $|M-c_j|>=32$ certifies its sign. The counts below distinguish zero transmitted signal, a nonzero signal with the same order, and a changed verdict.
+*What the classical tie costs.* The atlas contains 214,063,938 boards, or 107,031,969 horizontal-reflection representatives. On 342,175,835 within-context pairs tied by the classical score but with distinct WDL signs, the native neural score earns 69.65%. The context fixes material, both kings and the black man's square. This broad count permits pairs without a common legal White source. Our motif tests require a common source. There are 1,313,752 four-board configurations in which relocating the black man reverses the true ranking of two legal White moves and the classical evaluator ties both rows. A score of the form $f(x)+g(y)$ has a move margin independent of the opposing square $y$. Its order therefore cannot strictly follow both directions. Native NNUE follows both directions in 663,639 configurations. The learned direct piece-square branch follows both in zero. This finite comparison identifies interactions a destination table cannot express.
 
-#pagebreak()
-= 4. From a hand rule to a learned defensive route
-*The king changes a pawn race.* A reduced game lets the minor try to stop a black pawn while the kings are absent. Of 1,359,347 classically tied, informative bishop–pawn pairs, 295 have the strict opposite order to that race. In 253 of those, the white king obstructs the apparent capture diagonal. The resulting full-chess possibilities expose a network error with a concrete mechanism. On 108 quiet-pin cases, the direct branch earns 84 points; retaining the native difference of first-hidden unit 6 alone in addition to that branch reduces the total to 15, also the full network result. In 42 cases where the black king attacks the bishop and guards promotion, the intact network gets all 42 right. The same bottleneck can repair one omitted relation and overwrite a useful preference on another.
+*Chess and network interventions.* A chess deletion removes all Black replies in a specified class. We consult the tablebase after each remaining reply and take Black's best outcome. If no reply remains, we use the position's ordinary tablebase outcome. We call a move class decisive for the comparison when deletion erases its strict order. A network intervention substitutes selected activations from the sibling child and recomputes downstream layers. We average both donor directions. The hybrid activation vector can be outside the range reached by legal boards. A board-only correction evaluates each child independently.
 
-*Escort and material.* In a fresh set of 240 played comparisons, a conversion test with a thirteen-ply horizon still had overlapping bounds in 28. The static network ranked 24 of these correctly. One resulting hypothesis concerns support following a pawn push. After a black pawn push, remove a black king move on its next turn that guards the pawn's next square. In 2,830 rook/queen substitutions the removal erases the order in both materials. These pairs reduce to 23 different king–king–pawn placements. With the rook, the mean absolute gaps at H1 units 2, 6 and 7 are 29.60, 1.36 and 0.16 bytes. Substitute just the queen's Black-perspective accumulator at both endpoints and the gaps become 1.29, 28.36 and 72.94. In all 562 distinct seed children, Black-view coordinate FT625 is positive with the rook and zero with the queen. Its outgoing weights to the three units are +39, −29 and −41. FT961 changes from 0 to 127 on every child. A coordinate constant across the two moves can thus change a later unit's move sensitivity. Testing each material alone yields 2,586 different rook escort placements on ranks 3–7. Full score and unit-2-only ordering earn 77.88% and 76.28%.
+*Splits and comparisons.* Promotion channels and correction weights are chosen on discovery layouts. The validation layouts use disjoint orbits of king placements under board symmetries and king interchange. A king-layout orbit groups positions related by rotating or reflecting the board and exchanging the king locations. The original donor, geometry and skewer analyses are retrospective uses of the same atlas, including its validation partition. A separately sampled pair on a known atlas layout checks robustness within the atlas. The additional calendar sample and the new material strata test transfer under a different sampling process.
 
-*Advance the pawn.* Retaining the same kings, piece and choices and moving the seed pawn from the third to the second rank leaves 2,487 legal comparisons. With the white rook still present, H1 unit 7's mean absolute gap rises from 0.17 to 104.64 bytes. The raw accumulator move difference is exactly unchanged in every coordinate, as Proposition 2 predicts. The white viewpoint becomes especially informative. With a c2 pawn in that viewpoint, FT1424 averages 100.69 when the rook is off the promotion ray, 2.14 with a clear ray to c1 after the push and 123.49 with a king in the way. In all 641 eligible one-square white-king edits opening that rook ray, its activation drops.
 
-*Why the original test found five files.* White-view coordinates were selected by three conditions: the same unique strongest pawn-square weight in all 32 king buckets, consistent defender-weight suppression by a promotion ray, and an off-ray minus clear-ray gap above 32 bytes in each of four defending materials. Five files qualified (a, c, d, e and f). On b, FT1869 has the b2 maximum and weight suppression in all buckets. Its activation gaps for knight, bishop, rook and queen are 72.4, 58.9, 42.8 and 13.4 bytes. The queen case removes it from this screen. Its individual output ablation costs just 0.25 ordering points on fresh b layouts. On g the highest bucket agreement for a unique g2 maximum is 29/32; on h it is 31/32. The next experiment relaxes viewpoint and selectivity and tests which input differences actually carry useful score.
+== How a position change reaches the score
+The input to a feature coordinate is a bias plus piece-square weights in a bucket indexed by the relevant king. Write its raw value as $R=c+u(x)+v(y)$, where $x$ is the moving white man's destination and $y$ the black man's square. At fixed kings, moving the white man changes the raw sum by $u(i)-u(j)$, regardless of $y$. The network then clips the sum. The same raw change gives different byte differences when the two endpoints cross different clipping thresholds. In the hidden layers a division by 64 with downward integer rounding precedes clipping. Thus a board edit can change sensitivity to a move even when the change it produces in the raw accumulator is identical at both destinations.
 
-#pagebreak()
-= 5. Promotion control across all eight files
-The file labels in this section always use the white king's orientation. Each king independently reflects its own input horizontally. Black additionally reverses the ranks. A single Black-view channel can consequently serve multiple White-view files. For b and g the leading score contributor found in discovery is the same channel, FT273. Its largest own-pawn weight is on its own b7 in all 32 buckets. On White-view b with a defending rook, when Black also sees file b, its mean is 114.13 off the promotion ray and 4.17 on the clear ray. When Black sees g these means are 0.003 and 0. A king blocking the ray on Black-view b gives a mean of just 5.46. The feature responds strongly to alignment even on many obstructed lines. A one-square d/e-file king relocation preserves the Black king bucket while reflecting its input coordinates. Holding both other men and the white king fixed, with the rook off-ray in both positions, FT273 falls from mean 110.20 to exactly zero in the b-file panel (6,454 edits) and from 100.08 to zero on g (5,583). On White-view h, FT1282 prefers h2 in 27 buckets and b2 in five; the leading four include FT1166 and FT1867 with h2 maxima in 31 and 30 buckets respectively.
+To measure the resulting interaction, define $D(y)=S(i,y)-S(j,y)$ with the same destination order on both boards. Comparing the two enemy placements gives
+$ q = (D(y)-D(z))/2. $
+A shared preference for $i$ over $j$ cancels in this contrast. We use signed score units for this contrast and ordering credit for the ultimate decision. A component can affect the contrast and leave the final decision unchanged if other components supply a larger margin. For a second-layer unit with output weight $w$, its contribution on one row is exactly $w(h_i-h_j)/16$ in pre-rounding score units. Subtracting its contributions across the two rows tests the portion sensitive to the black man's location.
 
-#image("promotion.svg",width:100%)
-#cap[*Figure 1.* Loss of ordering credit after each file's chosen FT differences are equalized. Channels were ranked on discovery layouts. Bars give pointwise 95% percentile intervals from 2,000 resamples of whole held-out king groups. Each control is matched within viewpoint on discovery mean absolute move difference, excluding the leading eight. pp denotes percentage points.]
+With three or more destinations, even comparisons without any two-move reversal can defeat a shared destination table. @sec:graphs proves the exact criterion and gives a four-move example.
 
-#tbl((1fr,1fr,1fr,1fr,1fr,1fr),([File],[Pairs],[Native],[Drop first],[Drop four],[Drop eight]),(
-([b],[1,623],[90.14%],[86.44%],[73.83%],[61.97%]),
-([g],[1,819],[89.83%],[86.78%],[79.04%],[64.03%]),
-([h],[1,708],[92.71%],[87.53%],[71.12%],[60.55%])))
-#cap[*Table 1.* Scores after removing discovery-ranked inputs on the three omitted files. Each pair requires an actual promotion for its strict order. The sample covers 120 held-out king groups on each file. The four-channel sets are b (273, 360, 1282, 629), g (273, 1192, 360, 1182) and h (1282, 1166, 1867, 1192).]
+= Promotion channels and capture errors
+== A straight-square signal
+Stockfish 14.1 adds king-relative piece-square weights. Its feature transformer (FT) clips 1,024 coordinates per king view. We label the next two hidden layers H1 (eight units) and H2 (32 units), using zero-based unit indices. For example, FT625 denotes coordinate 625 of the concatenated transformer output. A scalar positional score joins a learned piece-square score at the output. We use the released four-piece head. For a third-rank pawn escorted by the black king, matching both king locations, both white moves and both outcomes gives 2,830 rook-to-queen comparisons from 23 king–king–pawn layouts. The rook routes most of the ordering through first-layer unit 2. The queen routes it through units 6 and 7. The matched sample is concentrated on the third rank. In a single-material test of 2,586 rook escort layouts across ranks 3–7, the full score earns 77.88%, and retaining only the differences at unit 2 in the hidden path earns 76.28%.
 
-*Where the network errs.* On b, g and h, when only the better White destination establishes a clear promotion attack and the worse is off the ray, strict correct counts are 1,126/1,126, 1,143/1,149 and 1,255/1,269. For pairs with the same coverage class at both ends, ordering scores are 74.71%, 73.99% and 76.85%. Both distributed use and concrete errors occur. On 733 played alternatives on these three files the four-channel intervention reduces credit from 97.89% to 86.39%; the April–September and October–December losses are 11.10 and 11.95 points. Across all files the 1,314 played comparisons give 97.56% and 85.12%. Channel selection used enumerated discovery choices; played positions can recur across games.
+A matched rook-to-queen comparison illustrates where the routes separate. With White Kd4 and Re6 against Black Kh1 and Pf3, moving the rook to e7 or f6 changes first-layer unit 2 from 0 to 30. Units 6 and 7 stay at zero. With a queen at the same source and destinations, unit 2 stays at zero, unit 6 changes from 0 to 31 and unit 7 from 126 to 67. The difference starts in the black king's view. On the original 562 distinct child geometries, FT625 is positive for the rook and zero for the queen. Its weights into units 2, 6 and 7 are +39, −29 and −41. FT961, by comparison, is constant between the two destinations but moves from 0 with the rook to 127 with the queen. Together with FT333, these three coordinates account for a measurable switch. Transplanting them from the queen into the rook lowers the accuracy obtained from unit 2 alone from 91.24% to 49.81%. This test keeps the same choices and isolates an input-driven change in which units respond.
 
-#pagebreak()
-= 6. When the same promotion channels hurt
-A white piece can cover the square straight ahead of the pawn while standing on a square the pawn can capture into. For example, White has Kb1 and Ne2 against Kd1 and Pb2. After Nc1 Black wins with ...bxc1=Q+ or ...bxc1=R+; after Nd4 Black can draw. The neural scores for Black are +68 and +101. The two choices tie the hand evaluator, and the neural evaluator strictly reverses their tablebase order. Physical b2 appears as g2 in the white king's orientation.
+Advancing the seed pawn from the third rank to the second while keeping the other pieces and both candidate moves fixed changes the same rook's first-layer response. The mean absolute difference at unit 7 rises from 0.17 to 104.64 bytes on 2,487 legal paired edits. One input, FT1424, helps explain the change. With a c2 pawn in the white king's orientation, it averages 100.69 when the defending rook is off the line to c1, 2.14 when the rook has a clear line to c1 after the push and 123.49 with a king blocking the rook. Moving the white king one square to open the rook line reduced the activation in all 641 eligible edits. This ties a measured feature to a specific change on the board.
 
-We reopened all 13,523 held-out promotion decisions. First delete just straight promotions at Black's first turn; separately delete just capture-promotions. Table 2 gives disjoint cases in which one of the two deletions erases the orthodox order and the other preserves it. The b, g and h panel also contains seven comparisons requiring the combined deletion, and the other files contain seventeen. Each cohort uses the four channels ranked for its own file on discovery, with both donor directions.
+Related signals extend across the eight files. The first white-view screen found five channels with a stable pawn-square maximum and a large clearance response in every tested material. The missing files include a switch of viewpoint. The b and g files in White's orientation can map to the same b-file input in Black's orientation, where FT273 has a stable pawn-square maximum. Relocating Black's king across the d/e boundary holds its weight bucket fixed and mirrors the inputs. FT273 falls from mean 110.20 to zero on 6,454 eligible b-file relocations with the rook off the line, and from 100.08 to zero on 5,583 equivalent g-file relocations. The h-file response is spread over several coordinates. We use four discovery-ranked coordinates per oriented file for the intervention below.
 
-#tbl((1.45fr,1fr,1fr,1fr,1fr),([White-view files],[Deletion],[Pairs],[Native],[Drop four]),(
-([b, g, h],[Straight],[4,504],[97.54%],[77.98%]),
-([b, g, h],[Capture],[639],[44.05%],[52.39%]),
-([a, c, d, e, f],[Straight],[7,155],[98.02%],[72.37%]),
-([a, c, d, e, f],[Capture],[1,201],[54.33%],[50.85%])))
-#cap[*Table 2.* Sorting after equalizing the same four selected FT move differences, conditional on which chess action supplies the order. Outcomes after deletion use orthodox tablebases from the next ply.]
+#figure(
+  placement: bottom,
+  scope: "parent",
+  caption: [*Reading the straight promotion square.* (a) FT1424 in legal rook-versus-pawn placements with the pawn on White-oriented c2. A clear rook line to c1 suppresses the feature. A king on the line restores it. (b) Ordering-credit loss from equalizing the leading channel, the four leading channels, or four activity-matched control channels. Discovery fixes the channels. The validation total is 13,523 promotion-dependent comparisons (1,497–1,819 per file). Points give means and bars give 95% king-orbit bootstrap intervals.],
+  image("paper-promotion.svg", width: 100%, alt: "A rook with a clear promotion line suppresses FT1424. Removing four leading channels has a larger effect than removing matched controls across all eight files."),
+) <fig:promotion-inputs>
 
-On b, g and h the sign of the intervention changes with the chess action. Removing the channels costs 19.56 ordering points on straight promotions (95% king-group interval 18.47–20.71); on capture-promotions the same edit gains 8.33 points (6.39–10.38). The latter group contributes 356 of the 467 strict errors on these files. The contrast is present within every defending material. Native capture-promotion scores are 45.3% against knights (43 pairs), 79.2% against bishops (24), 71.4% against rooks (145) and 32.7% against queens (427); straight-promotion scores exceed 95% in all four. Material composition therefore matters to the pooled effect size.
 
-The pattern identifies a failure mode of using the forward promotion square to evaluate a choice where the decisive promotion lands elsewhere. The interventions establish the sign of these four coordinates' joint effect on this population. On the original five files their effect on capture-promotions is smaller and has the opposite sign. Game alternatives support the intrinsic difficulty contrast on b, g and h: native scores are 98.99% on 693 straight-promotion pairs and 73.44% on 32 capture-promotion pairs. Equalizing four channels takes the latter to 67.97%. Thus the pooled ablation gain on captures is specific to the enumerated distribution here. The two panels differ in both support and material mix.
+The five-file screen required the same unique maximum pawn-square weight across all 32 White-king buckets and a large off-line versus clear-line activation contrast for each of four defending pieces. On b, FT1869 meets the weight criterion but its contrast is just 13.4 bytes for a queen, compared with 42.8–72.4 for the rook, bishop and knight. The best g and h White-view candidates meet the bucket-maximum criterion in 29 and 31 of 32 buckets. These facts explain why the single-view screen missed the three files. The held-out intervention gives a more direct measure of their importance. Removing four channels lowers ordering credit on every file by 10.79–28.33 points, with little change under the activity-matched control (@fig:promotion-inputs). On 1,314 played-position choices where promotion decides the WDL order, the same channel differences account for a 12.44-point loss. Both pieces of evidence establish circuit use without requiring one channel per file.
 
-#pagebreak()
-= 7. Why a skewer depends on second-layer unit 2
-A skewer can preserve its geometry and tablebase role while the attacked piece changes. In an initial 19,032 matched comparisons, removing H2 unit 2's difference moved bishop accuracy from 73.81% to 50.58%; the same edit changed queen accuracy from 71.96% to 71.95%. The 3,029 new matched comparisons change both king groups relative to channel discovery and destination pairs relative to the original sample.
+== What happens when the pawn can capture
+A white piece guarding the straight promotion square can itself be captured on a diagonal promotion square. In the opening example of this failure, place White Ka1 and Qe1 against Black Kb3 and Pg2. Qf1 guards g1 and permits ...gxf1=Q mate. Qe4 draws. The Black-side scores are −2403 and +77. With the pawn moved to d2, Qf1 wins for White and Qe4 draws. In that layout the Black-side scores are −304 and +119.
 
-The preactivation of H2 unit 2, in native logit units, is exactly
-$ 1873 + (65,-34,15,-17,7,23,10,-50) dot h, $
-where $h$ is the vector of eight H1 bytes. With the bishop, H1 units 1 and 3 average 1.88 and 3.07; with the queen they average 125.33 and 126.99. Their weights are both negative. FT1691 goes from mean 79.75 to 0.57; it feeds these same units with weights −28 and −45. FT577 goes from 2.54 to 34.10 and feeds them with +81 and +104. FT961 goes from 0 to 123.84. The eight greatest discovery-selected contributions to the downward logit shift, transplanted jointly into the bishop, reduce the H2 unit's gap from 18.49 to 0.71. Transplanting just H1 units 1 and 3 reduces it to 0.60, with 97.67% of endpoints at zero. Across materials, the native mean preactivation divided by 64 moves from +73.77 to −8.43.
+The two-row contrast answers a question a neuron probe alone leaves open. Use the same destination order in both rows and call the margins $m_g$ and $m_d$. A fixed preference for f1 over e4 changes both by the same amount. Their half-difference is unchanged. Here it is $(-2480-(-423))/2=-1028.5$ score units, even though the g2 row should favor f1 more than the d2 row. The negative sign measures an error that depends on the pawn location. The unclipped feature sums have zero residual, because the pawn term cancels when two destinations are subtracted at fixed kings. Restoring FT clipping and then the two hidden quantizers contributes −60.86, −1215.32 and +247.47 in an exact secant accounting with fixed reference slopes. On g2, two implicated bytes, FT273 and FT1282, fall from 127 and 127 on Qe4 to 56 and zero on Qf1. They are zero on both d2 endpoints. The direct output contributes zero to the contrast and rounding accounts for the remaining +0.22.
 
-#image("skewer.svg",width:96%)
-#cap[*Figure 2.* Left, native preactivations before the floor and ceiling (dashed lines). Right, what happens to the ordering when the unit's two endpoint values are equalized. Both panels use the same 3,029 paired geometries per material.]
+On the original validation panel for penultimate-rank pawns, 1,593 choices have a surviving capture option on the higher Black outcome only. The native score earns 49.72%. When the higher-WDL destination controls the straight promotion square and the lower-WDL destination lies off its line, the accuracy is 24.62% on 731 pairs. Removing the four chosen channel differences raises this to 38.85%. The other 862 choices in the same capture-option population move in the opposite direction, from 71.00% to 59.66%. The pooled intervention appears almost neutral, 49.72% to 50.11%. The two geometric slices show why. The channels favor a useful cue on some boards and a misleading one on others. Even in this targeted subgroup, most preferences remain incorrect after the intervention. The four coordinates explain one part of the error, conditional on the sibling donor.
 
-With the bishop the move-dependent signal chiefly enters through H1 unit 7. Its edge supplies +16.59 of the +20.25 mean signed score units carried by H2 unit 2. With the queen the same edge supplies +0.23. For 2,096 queen pairs the H2 difference is exactly zero; in 919 it is nonzero and both donor orderings survive. Only 14 change either verdict, against 1,151 bishop pairs. The queen retains useful information elsewhere: removing H1 unit 6 takes its native credit from 69.10% to 62.70%. Switching the bishop's two gate coordinates into the queen reopens H2 unit 2 (15.37-byte gap); the rest of the recipient network still conditions its output.
 
-On placements absent from the entire original substitution panel, the same skewer deletion identifies 3,979 bishop and 33,828 queen choices. Equalizing H2 unit 2 takes the bishop from 81.30% to 61.00%, and the queen from 71.64% to 71.73%. These fixed-material tests admit distinct outcome and position distributions. The same-board substitutions isolate the material effect.
+A second grouping tests whether this reversal also appears when we classify the decisive action by move deletion. In @fig:capture, panel (a), straight-promotion cases lose 23.30 points after channel equalization. The mean change is only +0.63 points when we pool all capture-promotion cases. Inside that pool, clear/off-line cases improve by 12.60 points and clear/clear cases lose 13.23 points. The sign therefore follows the relation of the defending piece to the straight square. The result also shows why the small pooled effect is an unreliable description of feature use.
 
-#pagebreak()
-= 8. A knight fork takes a different path
-On a safe knight fork, the attacker has a legal checking jump that attacks the opponent's man. An upstream geometric condition is that the knight's current square, the king's square and the man's square all attack a common square by knight displacement. To isolate the last relation, write $N(x)$ for the squares a knight attacks from $x$. Keep the king $w$ and rook $x$ such that $N(w) inter N(x)$ is nonempty. Moving the black knight $y$ can then change whether $N(y)$ intersects this set. The analogous test moves the rook with the knight and kings fixed. Both tests use check-free legal endpoints and admit a king or other piece on the hypothetical target. The geometric contrast concerns reachability; the decision panel separately enforces check, legality, safety and WDL necessity.
+== A board-only test
+The preceding donor experiment uses both candidate boards. To test the explanation without a donor or a tablebase score, we add a term to the native score when Black has a legal capturing promotion to a queen or rook that survives immediate capture and avoids stalemate. In a four-piece position with a single white man besides the king, that action removes White's last nonking piece and reaches a winning rook or queen ending. This is a local sufficient condition for a Black win in this material domain. We checked all 74,195 horizontal-reflection representatives satisfying the condition in the adjacent-capture geometry. Every board has positive Syzygy WDL. In particular, counting repairs on pairs selected for an indicator that already certifies the winning endpoint measures the size of a known ranking error. The coverage question requires the entire eligible sample. Simply finding a legal capture-promotion also finds 3,971 draws in that geometry.
 
-In the original 2,051 matched fork choices with the rook, retaining H1 units 0, 1 and 4 gives 72.17% against native 72.21%. We ranked FT contributions going specifically through those three units on 1,052 discovery pairs. Seven of the leading eight coordinates are in the white viewpoint. FT1111, FT1227 and FT1594 have weights −55, −30 and −51 into H1 unit 4. Opening a common target by relocating the knight raises their mean activations by 4.15, 5.20 and 6.17 bytes respectively over 7,951,960 contrasts; moving the rook gives 4.28, 4.06 and 5.26 over 1,264,812. Each contrast edits one piece with the other three fixed. Geometry and signed downstream influence are measured separately.
+We fit a single nonnegative weight on 18,427 discovery pairs by maximizing ordering credit over a grid from 0 to 4,096 in steps of 16. The fitted weight is 2,800 native units. We apply it unchanged to each board of every test pair, including those with no promotion-dependent outcome and those from played games. WDL determines test credit. The scoring rule reads only the board and legal continuations up to the immediate recapture.
 
-#tbl((1.42fr,.64fr,1fr,1fr,1fr,1fr),([Rook panel],[Pairs],[Native],[All edges],[Via 0/1/4],[Other edges]),(
-([Changed choices],[202],[73.02%],[57.80%],[57.43%],[73.02%]),
-([Outside layouts],[972],[75.15%],[66.85%],[66.77%],[75.15%])))
-#cap[*Table 3.* Remove the same eight FT differences from all H1 inputs, only their edges into H1 units 0, 1 and 4, or their edges into the other five units. Every downstream layer is recomputed. Each row comes from a distinct set of king–king–attacker placements.]
+#figure(
+  placement: auto,
+  caption: [Ordering credit after applying the frozen capture term. The last row applies the reply filter to the same seventh-rank stress pairs.],
+  booktabs(
+    (1.48fr, .72fr, .72fr, .72fr),
+    (left, right, right, right),
+    ([Cohort], [Pairs], [Native], [Adjusted]),
+    (
+      ([Four-piece validation], [16,518], [91.08%], [95.92%]),
+      ([Played Apr–Sep], [870], [97.18%], [98.16%]),
+      ([Played Oct–Dec], [809], [97.59%], [98.58%]),
+      ([Added white pawn], [18,129], [95.84%], [97.29%]),
+      ([Pawn on seventh rank], [3,589], [56.03%], [92.39%]),
+      ([Stress with reply filter], [3,589], [56.03%], [72.19%]),
+    ),
+  ),
+) <tab:correction>
 
-The pathway prediction is particularly sharp on the 972 outside-layout choices: removing its eight input differences through the nominated three units costs 60.09 mean score units, compared with 59.71 through all eight H1 units and −0.41 through the five-unit complement. A near match in average scores alone could arise from cancellation; the separate ordering endpoint in Table 3 replicates the distinction. The role changes with material here too. On 16,454 queen-versus-knight choices outside the original placements, native credit is 66.76%; targeting the three units gives 61.77%, while targeting their complement gives 64.56%. Additional pathways participate on the queen.
+On all 16,518 four-piece validation pairs, the surviving-capture rule improves credit by 4.84 percentage points (95% interval 4.51–5.19), with 805 strict rescues and zero harms. The any-legal-capture rule raises credit to 96.30%, with 906 rescues and 38 harms. It gives the larger net gain at the cost of overriding some correct rankings. Both rules use weights chosen on discovery. In the earlier two calendar cohorts, only 75 of 15,000 examined pairs distinguish the surviving-capture indicator. @tab:correction reports the aggregate results on the informative, classically tied pairs in each cohort.
 
-== What the three experiments explain together
-A chess concept can keep the same legal definition while its implementation changes with the material or the king used to orient the input. The threshold identity predicts how a background coordinate can change the network's sensitivity to a move. Endpoint accounting identifies which incoming signals actually cross thresholds. The margin criterion identifies when those signals matter to an ordering. The bishop skewer exhibits all three steps in one circuit. Promotion adds a coordinate-system explanation, and the fork isolates a different group of input-to-hidden edges. Quiet bishop pins give a case in which the learned transmission is strong and directionally wrong.
+#figure(
+  placement: bottom,
+  scope: "parent",
+  caption: [*When promotion channels help and when they hurt.* (a) Each group is defined by deleting straight or capturing promotions in the chess tree. For the capture-only subsets, the labels give the defender's access to the straight promotion square on the higher- and lower-WDL child for Black, in that order. Positive values mean that removing the channels improves ordering. Bars give 95% king-orbit bootstrap intervals. (b) Native ordering credit and ordering credit after adding the fixed board-only capture term. ‘Clear / off-line’ conditions on a surviving capture being available only on the higher-WDL child. Panel (b) gives point estimates. The panels use different inclusion criteria.],
+  image("paper-capture.svg", width: 100%, alt: "Removing the channels harms straight-promotion decisions but helps the clear versus off-line capture regime. The fixed correction restores ordering on the difficult legal-capture subset."),
+) <fig:capture>
 
-#pagebreak()
-= 9. Relation to earlier work and scope
-Pálsson and Björnsson [1] probed hand-evaluation concepts in Stockfish 14.1 and inspected positions that highlighted forks, promotions and king safety. McGrath et al. [2] traced concept acquisition in AlphaZero. Jenner et al. [3] patched Leela Chess Zero to investigate look-ahead along optimal lines; Lin et al. [4] traced tactical features in a chess transformer. Interchange interventions have a general foundation in causal-abstraction work [5]. Our contribution is a specific combination: a classical-score collision with an exact outcome order, an intervention on the legal continuations that give this order, and an intervention on native quantized coordinates under matched changes to the chessboard. This permits tests of a useful representation, a harmful representation and a signal too small to affect a decision under the same protocol.
 
-*Scope.* The algebra applies to coordinatewise quantized affine networks under the stated hypotheses. Coordinate identities, measured frequencies and substitution effects belong to the released four-man head of SF14.1. Selection on a classical tie and a WDL difference enriches these cohorts for decisions the hand evaluator finds difficult. Group ablations test jointly used information within the chosen coordinate basis. Other subsets can also suffice, and donor activations can produce internal states absent from ordinary play. Layout resampling quantifies variation among the eligible king groups; fresh training seeds, other releases and middlegames require separate validation. The monotonicity bound restricts additive models; hand-coded interaction features and exact bitbases can resolve distinctions within their domains.
+== What changes when a defender can promote
+The four-piece rule rests on the capture leaving White with only a king. To test that assumption we kept the two original White choices and sampled up to two legal locations for an added white pawn before consulting the tablebase. White's moving man was a knight, bishop or rook. Of 40,668 valid child observations, 1,188 offered a surviving capture. Their outcomes included 136 draws and one Black loss. The frozen weight improved ordering on the 18,129 pairs with unequal WDL and restored 262 strict preferences with zero harms in this sample. The 803 pairs also tied by the instrumented hand evaluator moved from 82.32% to 90.78%. The single-board counterexamples already show that the winning certificate is specific to four pieces.
 
-*Static scoring and search.* In an earlier side-to-move control on 352,000 positions in fourteen three- to five-man classes, the 14.1 NNUE outranked its classical evaluator for beneficial first moves in thirteen classes. The hand evaluator's exact king–pawn bitbase won the remaining comparison. On 6,000 decision roots the 14.1 production neural mode saved a net 94 tablebase outcomes at 64 search nodes and 15 at 4,096 nodes in that experiment. The present interventions target a static forward pass. The practical prediction is specific: the circuits matter most when search leaves these choices to the evaluator. Measuring search with these very edges intervened on is an open test.
+We then required a white pawn on its seventh rank and generated fresh legal common-source alternatives on held-out king layouts. Each pair offers the Black promotion option on exactly one child. The construction selects the two boards before checking WDL. Of 7,200 such pairs, 3,589 have different WDL signs. The option points to the worse Black outcome on 273 of these. Credit rises from 56.03% to 92.39% over the complete enriched sample, with 1,547 rescues and 241 harms. The pooled gain coexists with a systematic failure where the capture points to the worse outcome. For example, with White Kg7, Nf2 and Pe7 against Black Ka5 and Pg2, Nh1 allows the surviving ...gxh1=Q, but e8=Q holds the draw. Nd4 instead leaves Black a win. The native score ranks them correctly and the fixed correction reverses them. The added pawn supplies a reply that surviving the initial recapture does not address. A follow-up on the same stress sample adds the weight only when at least one surviving black promotion leaves White with no immediate promotion. This preserves all 241 native successes overturned by the original term and retains 580 of its 1,547 rescues. Overall credit is 72.19%, compared with 56.03% native and 92.39% after the unrestricted term. The reply filter trades coverage for fewer harmful interventions in this particular stress sample.
 
-*Reproduction and evidence.* The #link(evidence)[repository and research pull request] include the pinned Stockfish release and network retrieval procedure, native integer replay, machine-readable result tables and legal-action tests. Run the atlas, horizon, kings and routes experiments, then run #raw("manuscript/run.sh") on their scratch tree. The companion guide maps proofs and numbers to files. The paper's two figures are regenerated from held-out native traces and the archived tables. The Lichess panels derive from the #link("https://database.lichess.org/")[rated game archives]; tablebases and the probing implementation are specified in the reproducibility guide.
+#figure(
+  placement: bottom,
+  scope: "parent",
+  caption: [*Rescues and harms after adding a pawn.* The bars count strict ordering rescues and harms as shares of each cohort, with raw counts printed at the ends. A rescue turns an error or tie into a strict success. A harm turns a strict success into an error or tie. The final two rows use the same seventh-rank stress pairs. The reply filter trades some rescues for fewer harms in this sample.],
+  image("paper-transfer.svg", width: 100%, alt: "The frozen correction rescues many rankings in the seventh-rank stress cohort and harms 241. A reply filter preserves those rankings while rescuing only 580."),
+) <fig:transfer>
 
-== References
-#text(size:9.8pt)[
-1. Pálsson, A. and Björnsson, Y. (2023). #link("https://www.ijcai.org/proceedings/2023/541")[Unveiling Concepts Learned by a World-Class Chess-Playing Agent]. IJCAI.
-2. McGrath, T. et al. (2022). #link("https://doi.org/10.1073/pnas.2206625119")[Acquisition of Chess Knowledge in AlphaZero]. PNAS 119.
-3. Jenner, E. et al. (2024). #link("https://arxiv.org/abs/2406.00877")[Evidence of Learned Look-Ahead in a Chess-Playing Neural Network].
-4. Lin, R. et al. (2026). #link("https://arxiv.org/abs/2604.10158")[Tracing the Thought of a Grandmaster-level Chess-Playing Transformer].
-5. Geiger, A., Lu, H., Icard, T. and Potts, C. (2021). #link("https://arxiv.org/abs/2106.02997")[Causal Abstractions of Neural Networks]. NeurIPS.
-6. Stockfish developers. #link("https://github.com/official-stockfish/Stockfish/tree/sf_14.1/src")[Stockfish 14.1 evaluation and NNUE source].
-7. de Man, R. #link("https://github.com/syzygy1/tb")[Syzygy endgame tablebase generator].]
+
+#import "paper-expansion.typ": transfer-section
+#transfer-section(booktabs)
+
+= How specific is an internal path?
+== A shared readout in rook endings
+A rook skewer checks the king along the line to a white man behind it. In 3,029 matched comparisons, the bishop and queen versions have the same outcome difference and deleting the skewer removes that difference in both. Equalizing second-layer unit 2 reduces bishop ordering credit from 70.86% to 50.21%. Queen credit moves from 69.10% to 69.02%. Holding the geometry and outcomes fixed gives a direct test of the readout.
+
+In an example with White Kc7 and Bd4 against Black Kb1 and Ra2, Bg7 loses to ...Ra7+ while Bc5 draws. Both moves have the same outcomes with Qd4. At g7, switching to the queen changes FT1691, FT577 and FT961 from $(127,18,0)$ to $(0,43,109)$. The first-layer preactivations at units 1 and 3 move from $(-5138,-3517)$ to $(11631,44181)$. Their bytes switch from zero to 127. These units enter second-layer unit 2 with weights −34 and −17. Swapping only their values subtracts 6477 from each bishop preactivation in the example. The bishop's unit-2 bytes of 80 and 92 both become zero. The reverse transplant changes the queen from $(0,0)$ to $(83,98)$. A material-dependent shift of the baseline can therefore silence a move difference without changing the chess tactic.
+
+#figure(
+  placement: bottom,
+  scope: "parent",
+  caption: [*A material-dependent clipping floor.* The same 3,029 position pairs are evaluated with a bishop and a queen. (a) Distribution of unit-2 preactivations in byte units before clipping. The left shaded region lies below zero. Vertical lines mark 0 and 127. (b) Fractions of move pairs with an exactly zero difference, a nonzero difference that leaves both tested donor orders unchanged, or a changed order.],
+  image("paper-skewer.svg", width: 100%, alt: "The queen has more preactivations below the clipping floor and far fewer ordering changes when unit 2 is equalized than the bishop."),
+) <fig:skewer>
+
+
+Across the original matched layouts, 69.2% of the queen pairs have exactly zero difference at H2 unit 2, compared with 23.7% of the bishop pairs (@fig:skewer). In another 919 queen pairs the difference is nonzero but equalizing it leaves both donor orderings intact. This separates two explanations for the small observed intervention effect on the queen. A clipped difference has no route to the output. An active difference can also be too small relative to the rest of the score. Median native absolute margins are 107 for the queen and 11 for the bishop in this matched panel. The controls below examine whether the same suppression persists for small margins.
+
+The gate explains when unit 2 influences a decision. The control boards test its tactical specificity. Move the attacking rook from a2 to g5 in the example. Both moves now lose to direct captures. Subtract the margin on this equal-WDL control from the skewer margin using the same two destinations, as in the promotion contrast. Across 2,576 matched skewer/control layouts, unit 2 supplies +32.14 units to the bishop's skewer margin. Subtracting the direct-capture control gives a mean difference of −7.05. Removing it lowers bishop ordering credit on the skewer row, yet increases the fraction of graphs where a shared table can meet the skewer/neutral target, from 31.3% to 39.1%. In 2,556 of the control rectangles, both destinations allow a direct capture. The reference layout here is a different tactical threat with equal WDL between the two moves. The control tests whether the skewer adds a signal beyond the response to an immediate capture.
+
+== Rook action controls within the atlas
+We sampled 18,000 same-source, classically tied comparisons per defending material on held-out king layouts, for 72,000 in total. Unlike the original quiet panels, these permit immediate captures. We independently deleted moves that capture the white nonking piece and moves that skewer it. Each tactical series in @fig:readout isolates cases where one deletion removes the order and the other preserves it. Quiet neither cases lack a direct capture or skewer at both endpoints.
+
+#figure(
+  placement: bottom,
+  scope: "parent",
+  caption: [*Unit 2 across material and decisive actions.* Loss of ordering credit when equalizing the H2 unit-2 difference in both donor directions. The direct-capture and skewer series require the corresponding chess deletion to erase the ordering while the other preserves it. Quiet controls have neither action available. Bars give 95% king-orbit bootstrap intervals. The sample starts from 18,000 comparisons per defender. The small-margin panel retains native absolute margins of 1–31 score units.],
+  image("paper-rook-controls.svg", width: 100%, alt: "Readout loss is substantial for bishop and knight skewers and near zero for queen skewers, including when absolute native margins are small."),
+) <fig:readout>
+
+
+The action controls test the readout across materials. In bishop endings, unit 2 affects skewer, immediate capture and quiet controls. In queen endings its mean effect stays near zero even after restricting to small native margins. In that subset the two queen endpoints are both clipped to zero on 70.1% of skewer comparisons, versus 0.3% with a bishop. Clipping therefore persists at small margins, where a competing large native margin is excluded by design. The clipping mechanism explains why a material substitution changes the influence of this general readout. Quiet comparisons substantiate its broader use.
+
+== A narrower path for knight forks
+The knight-fork experiment tests whether an input-to-hidden path can localize a single legal tactic. We tested a black knight's checking fork of the white king and rook. For each square $u$ let $N(u)$ be the destinations of a knight jump. If the white king is on $w$, the white man on $x$ and the black knight on $y$, a possible fork destination lies in $N(w) inter N(x) inter N(y)$. This is a geometric screen. The chess test separately requires a legal checking jump and no immediate capture of the knight. A comparison is retained when deleting the qualifying forks erases its strict WDL order.
+
+In the original 2,051 matched rook/queen fork comparisons, retaining the three selected H1 differences gives 72.17% for the rook, close to 72.21% natively. The matched intervention row in @fig:fork uses the 202 comparisons retained by the alternate-pair, validation-king and legal-fork screens. These denominators describe distinct panels. We ranked input coordinates by the signed margin they contribute through those three units on separate discovery layouts. Seven of the leading eight are in the white king's view. To check what these coordinates respond to, we hold the king bucket fixed. Over the squares from which a knight can check the king, we compare the weights on knight locations that can reach each checking square and the weights on rook locations that can be attacked from it. Six of the seven inputs have mean correlations in the 96.1st–99.8th percentiles of the White-view features (@fig:fork, panel (a)). This weight pattern suggests a preference for the same possible fork square in both pieces' placements.
+
+We tested that interpretation with 18,181 legal four-board configurations. Both nonking pieces are two knight jumps from the white king at every endpoint. Only the diagonal boards share a reachable checking fork square. In this construction, simple proximity to the king is matched across the four boards. The raw accumulator mixed difference is zero on every configuration. After clipping, all eight selected coordinates contribute positive mean activation differences. The mean mixed difference of the final score is +83.66 native units (95% king-orbit interval +75.02 to +92.68). This is a test of the geometric association. The next comparison checks whether it matters to decisions that require the legal tactic.
+
+On 972 held-out rook-fork choices outside the matched panel, removing the selected input differences only on edges into H1 units 0, 1 and 4 lowers ordering credit from 75.15% to 66.77%. Removing their edges into the five remaining units leaves mean credit at 75.15%. Activity-matched controls on the three nominated units cost 0.28 points, compared with 8.38 for the selected inputs. The same edit on 34,180 no-fork rook comparisons costs 0.20 points. With a queen as the target of the fork, the loss is 4.99 points through units 0, 1 and 4 and 2.20 points through the complementary edges. This test gives a narrow tactical interpretation for the rook path, with weaker concentration under the material substitution. The counts and effect sizes are more informative about specificity than their ratio, since the no-fork effect is close to zero.
+
+#figure(
+  placement: bottom,
+  scope: "parent",
+  caption: [*A more specific route for knight forks.* (a) Empirical cumulative distribution of the weight correlation across the White-view features. The ticks mark the seven selected White-view inputs. The dashed horizontal line marks the 95th percentile. (b) The matched rook row uses 202 validation comparisons. Ordering-credit loss follows removal of the differences in eight inputs only on their connections to first-layer units 0, 1 and 4, on the remaining first-layer connections, or at activity-matched controls going into 0, 1 and 4. Bars give 95% king-orbit bootstrap intervals.],
+  image("paper-fork.svg", width: 100%, alt: "Selected knight-fork features tend to have high cross-piece weight correlations. The nominated first-layer route matters most on fork comparisons with a rook."),
+) <fig:fork>
+
+
+= Scope
+In Stockfish 14.1 the channel intervention shows one way a useful cue becomes misleading. The rook controls show why clipping alone gives limited evidence of tactical specificity. The fork study gives stronger evidence for a conditional path because the effect concentrates on selected edges and shrinks on both no-fork and activity-matched controls.
+
+The channel identities and readout explanations apply to the released 14.1 weights. The additional releases test transfer of the decision-level phenomenon. Stockfish 18's threat ablation alters an entire input group. Its effect can therefore combine several changes in the representation. The synthetic samples describe the specified material families and sampling rules. The played comparisons measure alternatives to an observed move in rated online play. Search tests disable tablebase access. Restricted pairs measure the change in ordering from static to search scores. Full-root search measures WDL-preserving choices on four-piece played positions.
+
+#include "paper-appendix.typ"
+
+#heading(numbering: none, outlined: false)[References]
+#text(size: 8pt)[
+  #refitem(1)[Pálsson, A. and Björnsson, Y. (2023). #link("https://doi.org/10.24963/ijcai.2023/541")[Unveiling Concepts Learned by a World-Class Chess-Playing Agent]. *IJCAI*, 4864–4872.]
+  #refitem(2)[McGrath, T., Kapishnikov, A., Tomašev, N., Pearce, A., Wattenberg, M., Hassabis, D., Kim, B., Paquet, U., and Kramnik, V. (2022). #link("https://doi.org/10.1073/pnas.2206625119")[Acquisition of Chess Knowledge in AlphaZero]. *PNAS*, 119(47).]
+  #refitem(3)[Jenner, E., Kapur, S., Georgiev, V., Allen, C., Emmons, S., and Russell, S. (2024). #link("https://papers.nips.cc/paper_files/paper/2024/hash/37d9f19150fce07bced2a81fc87d47a6-Abstract-Conference.html")[Evidence of Learned Look-Ahead in a Chess-Playing Neural Network]. *NeurIPS*.]
+  #refitem(4)[Stockfish developers. #link("https://github.com/official-stockfish/Stockfish/tree/sf_14.1/src")[Stockfish 14.1 evaluation and NNUE source], network `nn-13406b1dcbe0.nnue`.]
+  #refitem(5)[de Man, R. #link("https://github.com/syzygy1/tb")[Syzygy endgame tablebase generator].]
+  #refitem(6)[Jiang, X., Lim, L.-H., Yao, Y., and Ye, Y. (2011). #link("https://doi.org/10.1007/s10107-010-0419-x")[Statistical Ranking and Combinatorial Hodge Theory]. *Mathematical Programming*, 127, 203–244.]
+  #refitem(7)[Lichess Open Database. #link("https://database.lichess.org/")[Rated standard games, 2013–2014].]
+  #refitem(8)[Schut, L., et al. (2025). #link("https://pmc.ncbi.nlm.nih.gov/articles/PMC12002201/")[Bridging the human–AI knowledge gap through concept discovery and transfer in AlphaZero]. *PNAS*, 122.]
+  #refitem(9)[Marsland, T. A. (1986). #link("https://doi.org/10.3233/ICG-1986-9102")[A Review of Game-Tree Pruning]. *ICCA Journal*, 9(1), 3–19.]
+  #refitem(10)[Zhang, F. and Nanda, N. (2024). #link("https://proceedings.iclr.cc/paper_files/paper/2024/hash/06a52a54c8ee03cd86771136bc91eb1f-Abstract-Conference.html")[Towards Best Practices of Activation Patching in Language Models]. *ICLR*.]
+  #refitem(11)[Heimersheim, S. and Nanda, N. (2024). #link("https://arxiv.org/abs/2404.15255")[How to use and interpret activation patching]. *arXiv:2404.15255*.]
+  #refitem(12)[Karp, R. M. (1978). #link("https://doi.org/10.1016/0012-365X(78)90011-0")[A characterization of the minimum cycle mean in a digraph]. *Discrete Mathematics*, 23(3), 309–311.]
+  #refitem(13)[Stockfish developers. #link("https://github.com/official-stockfish/Stockfish/tree/sf_12/src")[Stockfish 12 source] and #link("https://github.com/official-stockfish/Stockfish/tree/sf_18/src")[Stockfish 18 source and evaluation].]
+
+]
+
+#for name in (
+  "cycle-arcs",
+  "preference-cycles",
+  "preference-graphs",
+  "expansion-flow",
+  "expansion-static",
+  "expansion-donors",
+  "expansion-threats",
+  "expansion-sf18-selector",
+  "expansion-search",
+  "expansion-root",
+  "promotion-match-flow",
+  "promotion-match-strata",
+  "promotion-matched",
+  "promotion-match-swap",
+  "promotion-match-path",
+  "promotion-match-played-choice",
+  "promotion-match-history",
+) {
+  let filename = name + ".csv"
+  pdf.attach(filename, read("results/" + filename, encoding: none),
+    relationship: "data", mime-type: "text/csv")
+}

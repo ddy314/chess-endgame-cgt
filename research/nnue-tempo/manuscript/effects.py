@@ -26,12 +26,16 @@ def ft_flow(net, x, t, units=None):
     return flow
 
 
-def patch(net, x, t, ids):
+def donor_margins(net, x, t, ids):
     change = delta(x)[:, ids] @ net.w1[:, ids].T
     scores = net.upper(t["z"] + np.stack([-change, change], axis=1), t["ps"])["score"]
     native = t["score"]
-    left, right = scores[:, 0] - native[:, 1], native[:, 0] - scores[:, 1]
-    return (credit(left) + credit(right)) / 2, delta(native) - (left + right) / 2
+    return scores[:, 0] - native[:, 1], native[:, 0] - scores[:, 1]
+
+
+def patch(net, x, t, ids):
+    left, right = donor_margins(net, x, t, ids)
+    return (credit(left) + credit(right)) / 2, delta(t["score"]) - (left + right) / 2
 
 
 def ci(keys, effects):
